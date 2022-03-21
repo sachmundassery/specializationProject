@@ -1,0 +1,783 @@
+import React, { useEffect, useState } from "react";
+
+const Report = () => {
+	useEffect(async () => {
+		const formData = new FormData();
+		formData.append("type", "fetchCsv");
+
+		const response = await fetch("http://127.0.0.1:8000/company", {
+			method: "POST",
+			body: formData,
+		});
+		const result = await response.json();
+		console.log(result["allCsvFiles"][0]["csvuploaded"]);
+		
+	}, []);
+
+	
+
+	return (
+		<div class="chartbox">
+			<canvas id="chart"></canvas>
+		</div>
+	);
+};
+
+export default Report;
+
+
+
+
+LEVEL1
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+import React, { useEffect, useState } from "react";
+import { Line } from "react-chartjs-2";
+import { csv } from "d3";
+import { Chart } from "chart.js";
+
+const Report = () => {
+	const [csvData, setCsvData] = useState([]);
+	// const [plotData, setPlotData] = useState();
+
+	useEffect(async () => {
+		const formData = new FormData();
+		formData.append("type", "fetchCsv");
+
+		const response = await fetch("http://127.0.0.1:8000/company", {
+			method: "POST",
+			body: formData,
+		});
+		const result = await response.json();
+		const data = Object.values(result["csvDataFrameArray"]);
+		var reqData = [];
+		for (var i = 0; i < data.length; i++) {
+			const temp = Object.values(data[i]);
+			reqData.push(temp);
+		}
+
+		var fullCsv = {};
+
+		for (var i = 0; i < reqData.length; i++) {
+			var sales = [];
+			var store = [];
+			var promo = [];
+			for (var j = 0; j < reqData[i].length; j++) {
+				sales.push(reqData[i][j]["Sales"]);
+				store.push(reqData[i][j]["Store"]);
+				promo.push(reqData[i][j]["Promo"]);
+			}
+
+			var eachCsv = getChartFormattedData(sales, store, promo);
+			fullCsv[Object.keys(result["csvDataFrameArray"])[i]] = eachCsv;
+		}
+
+		setCsvData(() => {
+			return fullCsv;
+		});
+	}, []);
+
+	function getChartFormattedData(sales, store, promo) {
+		return {
+			labels: store,
+			datasets: [
+				{
+					label: "Sales Trend",
+					data: sales,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Promotion Trend",
+					data: promo,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+			],
+		};
+	}
+
+	return (
+		<>
+			{Object.keys(csvData).map((singleCsv) => {
+				return (
+					<div className="graph" key={singleCsv}>
+						<p>{singleCsv}</p>
+						<Line data={csvData[singleCsv]} />
+					</div>
+				);
+			})}
+		</>
+	);
+};
+
+export default Report;
+
+------------------------------------------------------------------------------------------------------
+
+
+views.py
+
+# python import
+# import uuid
+# import os.ath
+import csv
+import json
+# django imports
+# from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+
+# third party imports
+from rest_framework.views import APIView, Response
+from django.http import HttpResponse
+# password hash
+# import hashlib
+from passlib.hash import pbkdf2_sha256
+
+# in house imports
+from .models import CompanyRegister,companyCsvUpload
+import pandas as pd
+
+
+class Company(APIView):
+
+    @csrf_exempt
+    # def post(self, request, *args, **kwargs):
+    def post(self, request):
+
+        if request.method == "POST":
+            if request.data['type'] == 'Register':
+                # Validate if the request method contain all the required parameters
+
+                username = request.data['username']
+                companyname = request.data['companyname']
+                email = request.data['email']
+                password = request.data['password']
+
+                # enc_password = hashlib.sha256(str.encode(password)).hexdigest()
+                enc_password = pbkdf2_sha256.hash(password)
+                companyidcard = request.data['companyidcard']
+
+                company = CompanyRegister(username=username, companyname=companyname, email=email, password=enc_password,
+                                          companyidcard=companyidcard)
+                company.save()
+                return Response({"This worked"})
+            elif request.data['type'] == 'Login':
+
+                username = request.data['username']
+                password = request.data['password']
+                user = CompanyRegister.objects.all().filter(username=username)
+                user_is_valid = pbkdf2_sha256.verify(password, user[0].password)
+                return Response({"authenticationStatus":user_is_valid,"userSignedIn":user[0].username})
+
+            elif request.data['type'] == 'csvUpload':
+
+                user = CompanyRegister.objects.get(username=request.data['userName'])
+                csvuploaded = request.FILES["csvUploaded"]
+                # print(type(request.FILES))
+                # print(request.FILES)
+                companycsv = companyCsvUpload(username=user, csvuploaded=csvuploaded)
+                companycsv.save()
+                return Response({"uploaded file reached django"})
+
+            elif request.data['type'] == 'fetchCsv':
+
+                allCsvFiles = companyCsvUpload.objects.values('csvuploaded')
+                test = companyCsvUpload.objects.all()
+                print(len(test))
+                # print(test[1].csvuploaded)
+                # print(test[1].username.companyname)
+
+                csvDataFrameArray = {}
+
+                for i in range(0, len(test)):
+                    data = {}
+                    csvFile = test[i].csvuploaded
+                    print(test[i].username.companyname,"-----------",test[i].csvuploaded)
+                    with open(str(csvFile), encoding='utf-8') as csvf:
+                        csvReader = csv.DictReader(csvf)
+                        for rows in csvReader:
+                            key = rows['Store']
+                            data[key] = rows
+                        json.dumps(data, indent=4)
+                        csvDataFrameArray[test[i].username.companyname] = data
+
+                return Response({"csvDataFrameArray": csvDataFrameArray})
+
+            else:
+                return Response({"Invalid post method"})
+
+    @csrf_exempt
+    # def get(self, request, *args, **kwargs):
+    def get(self, request):
+        if request.method == "GET":
+            pass
+
+
+
+LEVEL2
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+reports.js
+
+import React, { useEffect, useState } from "react";
+import { Line } from "react-chartjs-2";
+import { csv } from "d3";
+import { Chart } from "chart.js";
+
+const Report = () => {
+	const [csvData, setCsvData] = useState([]);
+	// const [plotData, setPlotData] = useState();
+
+	useEffect(async () => {
+		const formData = new FormData();
+		formData.append("type", "fetchCsv");
+
+		const response = await fetch("http://127.0.0.1:8000/company", {
+			method: "POST",
+			body: formData,
+		});
+		const result = await response.json();
+		const data = Object.values(result["csvDataFrameArray"]);
+		var reqData = [];
+		for (var i = 0; i < data.length; i++) {
+			const temp = Object.values(data[i]);
+			reqData.push(temp);
+		}
+
+		var fullCsv = {};
+
+		for (var i = 0; i < reqData.length; i++) {
+			var sales = [];
+			var customers = [];
+			var promo = [];
+			var dates = [];
+			for (var j = 0; j < reqData[i].length; j++) {
+				sales.push(reqData[i][j]["Sales"]);
+				customers.push(reqData[i][j]["Customers"]);
+				promo.push(reqData[i][j]["Promo"]);
+				dates.push(reqData[i][j]["Date"]);
+			}
+
+			var eachCsv = getChartFormattedData(sales, customers, promo, dates);
+			fullCsv[Object.keys(result["csvDataFrameArray"])[i]] = eachCsv;
+		}
+
+		setCsvData(() => {
+			return fullCsv;
+		});
+	}, []);
+
+	function getChartFormattedData(sales, customers, promo, dates) {
+		return {
+			labels: dates,
+			datasets: [
+				{
+					label: "Sales Trend",
+					data: sales,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Promotion Trend",
+					data: promo,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Customers",
+					data: customers,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+			],
+		};
+	}
+
+	return (
+		<>
+			<div className="ui-search">
+				<input
+					type="text"
+					placeholder="Search by company name..."
+					name=""
+					id=""
+					className="prompt"
+					// value={searchTerm}
+					// onChange={getSearchTerm}
+					// ref={inputElement} // binding use ref to input tag
+				/>
+			</div>
+
+			{Object.keys(csvData).map((singleCsv) => {
+				return (
+					<div className="graph" key={singleCsv}>
+						<p>{singleCsv}</p>
+						<Line data={csvData[singleCsv]} />
+					</div>
+				);
+			})}
+		</>
+	);
+};
+
+export default Report;
+--------------------------------------------------------------------------------------
+
+views.py
+
+# python import
+# import uuid
+# import os.ath
+import csv
+import json
+# django imports
+# from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+
+# third party imports
+from rest_framework.views import APIView, Response
+from django.http import HttpResponse
+# password hash
+# import hashlib
+from passlib.hash import pbkdf2_sha256
+
+# in house imports
+from .models import CompanyRegister,companyCsvUpload
+import pandas as pd
+
+
+class Company(APIView):
+
+    @csrf_exempt
+    # def post(self, request, *args, **kwargs):
+    def post(self, request):
+
+        if request.method == "POST":
+            if request.data['type'] == 'Register':
+                # Validate if the request method contain all the required parameters
+
+                username = request.data['username']
+                companyname = request.data['companyname']
+                email = request.data['email']
+                password = request.data['password']
+
+                # enc_password = hashlib.sha256(str.encode(password)).hexdigest()
+                enc_password = pbkdf2_sha256.hash(password)
+                companyidcard = request.data['companyidcard']
+
+                company = CompanyRegister(username=username, companyname=companyname, email=email, password=enc_password,
+                                          companyidcard=companyidcard)
+                company.save()
+                return Response({"This worked"})
+            elif request.data['type'] == 'Login':
+
+                username = request.data['username']
+                password = request.data['password']
+                user = CompanyRegister.objects.all().filter(username=username)
+                user_is_valid = pbkdf2_sha256.verify(password, user[0].password)
+                return Response({"authenticationStatus":user_is_valid,"userSignedIn":user[0].username})
+
+            elif request.data['type'] == 'csvUpload':
+
+                user = CompanyRegister.objects.get(username=request.data['userName'])
+                csvuploaded = request.FILES["csvUploaded"]
+                # print(type(request.FILES))
+                # print(request.FILES)
+                companycsv = companyCsvUpload(username=user, csvuploaded=csvuploaded)
+                companycsv.save()
+                return Response({"uploaded file reached django"})
+
+            elif request.data['type'] == 'fetchCsv':
+
+                allCsvFiles = companyCsvUpload.objects.values('csvuploaded')
+                test = companyCsvUpload.objects.all()
+                print(len(test))
+                # print(test[1].csvuploaded)
+                # print(test[1].username.companyname)
+
+                csvDataFrameArray = {}
+
+                for i in range(0, len(test)):
+                    data = {}
+                    csvFile = test[i].csvuploaded
+                    print(test[i].username.companyname,"-----------",test[i].csvuploaded)
+                    with open(str(csvFile), encoding='utf-8') as csvf:
+                        csvReader = csv.DictReader(csvf)
+                        for rows in csvReader:
+                            key = rows['Date']
+                            data[key] = rows
+                        json.dumps(data, indent=4)
+                        csvDataFrameArray[test[i].username.companyname] = data
+
+                return Response({"csvDataFrameArray": csvDataFrameArray})
+
+            else:
+                return Response({"Invalid post method"})
+
+    @csrf_exempt
+    # def get(self, request, *args, **kwargs):
+    def get(self, request):
+        if request.method == "GET":
+            pass
+---------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
+LEVEL 3
+
+Reports.js
+
+import React, { useEffect, useState, useRef } from "react";
+import { Line } from "react-chartjs-2";
+import { csv } from "d3";
+import { Chart } from "chart.js";
+
+const Report = () => {
+	const [csvData, setCsvData] = useState([]);
+	const [searchTerm, setSearchTerm] = useState("");
+	const inputElement = useRef("");
+	const [searchResult, setSearchResult] = useState([]);
+	// const [plotData, setPlotData] = useState();
+
+	useEffect(async () => {
+		const formData = new FormData();
+		formData.append("type", "fetchCsv");
+
+		const response = await fetch("http://127.0.0.1:8000/company", {
+			method: "POST",
+			body: formData,
+		});
+		const result = await response.json();
+		const data = Object.values(result["csvDataFrameArray"]);
+		var reqData = [];
+		for (var i = 0; i < data.length; i++) {
+			const temp = Object.values(data[i]);
+			reqData.push(temp);
+		}
+
+		var fullCsv = {};
+
+		for (var i = 0; i < reqData.length; i++) {
+			var sales = [];
+			var customers = [];
+			var promo = [];
+			var dates = [];
+			for (var j = 0; j < reqData[i].length; j++) {
+				sales.push(reqData[i][j]["Sales"]);
+				customers.push(reqData[i][j]["Customers"]);
+				promo.push(reqData[i][j]["Promo"]);
+				dates.push(reqData[i][j]["Date"]);
+			}
+
+			var eachCsv = getChartFormattedData(sales, customers, promo, dates);
+			fullCsv[Object.keys(result["csvDataFrameArray"])[i]] = eachCsv;
+		}
+
+		setCsvData(() => {
+			return fullCsv;
+		});
+	}, []);
+
+	const getSearchTerm = () => {
+		setSearchTerm(inputElement.current.value);
+		if (inputElement.current.value.length != 0) {
+			const newData = Object.keys(csvData).filter((companyName) => {
+				// console.log(inputElement.current.value);
+				return Object.values(companyName)
+					.join("")
+					.toLowerCase()
+					.includes(inputElement.current.value.toLowerCase());
+			});
+			var temp = {};
+			for (var index = 0; index < newData.length; index++) {
+				temp[newData[index]] = csvData[newData[index]];
+			}
+			setSearchResult(temp);
+		}
+	};
+
+	function getChartFormattedData(sales, customers, promo, dates) {
+		return {
+			labels: dates,
+			datasets: [
+				{
+					label: "Sales Trend",
+					data: sales,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Promotion Trend",
+					data: promo,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Customers",
+					data: customers,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+			],
+		};
+	}
+
+	return (
+		<>
+			<div className="ui-search">
+				<input
+					type="text"
+					placeholder="Search by company name..."
+					name="searchTerm"
+					id=""
+					className="prompt"
+					onChange={getSearchTerm}
+					ref={inputElement} // binding use ref to input tag
+				/>
+			</div>
+
+			<div className="graphRow">
+				{searchTerm.length == 0
+					? Object.keys(csvData).map((singleCsv) => {
+							return (
+								<div className="graph" key={singleCsv}>
+									<p>{singleCsv}</p>
+									<Line data={csvData[singleCsv]} />
+								</div>
+							);
+					  })
+					: Object.keys(searchResult).map((singleCsv) => {
+							return (
+								<div className="graph" key={singleCsv}>
+									<p>{singleCsv}</p>
+									<Line data={csvData[singleCsv]} />
+								</div>
+							);
+					  })}
+			</div>
+		</>
+	);
+};
+
+export default Report;
+
+----------------------------------------------------------------------------------
+----------------------------------------------------------------------------------
+pagination is happening but, company name not changing, bcz we gave it separate
+-------
+import React, { useEffect, useState, useRef } from "react";
+import { Line } from "react-chartjs-2";
+
+const Report = () => {
+	const [csvData, setCsvData] = useState([]);
+	const [incomingCsvData, setIncomingCsvData] = useState();
+	const [searchTerm, setSearchTerm] = useState("");
+	const inputElement = useRef("");
+	const [searchResult, setSearchResult] = useState([]);
+	const [paginateStatus, setPaginatestatus] = useState(false);
+	const [showChartStatus, setShowChartStatus] = useState(false);
+	const [currentPage, setCurrentPage] = useState(1);
+	const [itemPerPage, setItemPerPage] = useState(2);
+	const [pages, setPages] = useState([]);
+
+	useEffect(async () => {
+		const formData = new FormData();
+		formData.append("type", "fetchCsv");
+
+		const response = await fetch("http://127.0.0.1:8000/company", {
+			method: "POST",
+			body: formData,
+		});
+		const result = await response.json();
+		setIncomingCsvData(() => {
+			return result;
+		});
+
+		// to get number of Pages
+		for (
+			let i = 1;
+			i <=
+			Math.ceil(Object.keys(result["csvDataFrameArray"]).length / itemPerPage);
+			i++
+		) {
+			setPages((pages) => [...pages, i]);
+		}
+	}, []);
+
+	const fetchChart = () => {
+		setShowChartStatus(true);
+		// Pagination
+		const indexOfLastItem = currentPage * itemPerPage;
+		const indexOfFirstItem = indexOfLastItem - itemPerPage;
+
+		const data = Object.values(incomingCsvData["csvDataFrameArray"]);
+		// const data = Object.values(incomingCsvData["csvDataFrameArray"]).slice(
+		// 	indexOfFirstItem,
+		// 	indexOfLastItem
+		// );
+		console.log("data", data);
+		var reqData = [];
+		for (var i = 0; i < data.length; i++) {
+			const temp = Object.values(data[i]);
+			reqData.push(temp);
+		}
+		console.log("current page ", currentPage);
+
+		var fullCsv = {};
+
+		for (var i = 0; i < reqData.length; i++) {
+			var sales = [];
+			var customers = [];
+			var promo = [];
+			var dates = [];
+			for (var j = 0; j < reqData[i].length; j++) {
+				sales.push(reqData[i][j]["Sales"]);
+				customers.push(reqData[i][j]["Customers"]);
+				promo.push(reqData[i][j]["Promo"]);
+				dates.push(reqData[i][j]["Date"]);
+			}
+
+			var eachCsv = getChartFormattedData(sales, customers, promo, dates);
+			fullCsv[Object.keys(incomingCsvData["csvDataFrameArray"])[i]] = eachCsv;
+		}
+
+		setCsvData(() => {
+			return fullCsv;
+		});
+	};
+
+	const getSearchTerm = () => {
+		setSearchTerm(inputElement.current.value);
+		if (inputElement.current.value.length != 0) {
+			const newData = Object.keys(csvData).filter((companyName) => {
+				// console.log(inputElement.current.value);
+				return Object.values(companyName)
+					.join("")
+					.toLowerCase()
+					.includes(inputElement.current.value.toLowerCase());
+			});
+			var temp = {};
+			for (var index = 0; index < newData.length; index++) {
+				temp[newData[index]] = csvData[newData[index]];
+			}
+			setSearchResult(temp);
+		}
+	};
+
+	function getChartFormattedData(sales, customers, promo, dates) {
+		return {
+			labels: dates,
+			datasets: [
+				{
+					label: "Sales Trend",
+					data: sales,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Promotion Trend",
+					data: promo,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+				{
+					label: "Customers",
+					data: customers,
+					backgroundColor: "rgba(255, 99, 132, 0.2)",
+					borderColor: "rgba(255, 99, 132, 1)",
+					// borderColor: Utils.CHART_COLORS.blue,
+					borderWidth: 2,
+				},
+			],
+		};
+	}
+	const handleClick = (e) => {
+		setCurrentPage(() => {
+			return Number(e.target.id);
+		});
+		fetchChart();
+	};
+
+	return (
+		<>
+			<div className="ui-search">
+				<input
+					type="text"
+					placeholder="Search by company name..."
+					name="searchTerm"
+					id=""
+					className="prompt"
+					onChange={getSearchTerm}
+					ref={inputElement} // binding use ref to input tag
+				/>
+			</div>
+			<button onClick={fetchChart} className="btn-show-chart">
+				Show Charts
+			</button>
+			{showChartStatus && (
+				<>
+					<div className="graphRow">
+						{searchTerm.length == 0
+							? Object.keys(csvData).map((singleCsv) => {
+									return (
+										<div className="graph" key={singleCsv}>
+											<p>{singleCsv}</p>
+											<Line data={csvData[singleCsv]} />
+										</div>
+									);
+							  })
+							: Object.keys(searchResult).map((singleCsv) => {
+									return (
+										<div className="graph" key={singleCsv}>
+											<p>{singleCsv}</p>
+											<Line data={csvData[singleCsv]} />
+										</div>
+									);
+							  })}
+					</div>
+
+					{pages.map((number) => {
+						return (
+							<button
+								key={number}
+								id={number}
+								onClick={handleClick}
+								className="pageBtn"
+							>
+								{number}
+							</button>
+						);
+					})}
+				</>
+			)}
+		</>
+	);
+};
+
+export default Report;
+
+
